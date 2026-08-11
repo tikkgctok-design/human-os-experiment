@@ -19,6 +19,9 @@
 - [ ] Import conversations, nodes/messages, attachments, parent links, timestamps and source IDs (attachments remain).
 - [x] Make ingestion idempotent and retain changed object versions.
 - [x] Validate referential integrity, duplicate handling and non-fatal diagnostics.
+- [x] Add canonical identity-first ingestion for photo, video, audio, note and message.
+- [x] Add schema v3 attachments, deduplicated blobs and idempotent RAW locations.
+- [ ] Normalize special ChatGPT content and attachment references.
 
 ## Milestone 2 — Retrieval proof
 
@@ -28,7 +31,8 @@
 
 ## Milestone 3 — Photo archive
 
-- [ ] Ingest photo metadata and hashes.
+- [ ] Ingest the photo archive using the canonical identity layer (hashing and metadata
+  storage primitives are implemented).
 - [ ] Extract EXIF time, GPS and device metadata where available.
 - [ ] Add duplicate detection and similarity clustering.
 - [ ] Add selective visual analysis.

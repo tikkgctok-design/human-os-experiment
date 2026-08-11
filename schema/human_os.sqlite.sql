@@ -14,6 +14,7 @@ CREATE TABLE objects (
     topic TEXT,
     event_id TEXT,
     confidence REAL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
     created_at DATETIME NOT NULL,
     FOREIGN KEY (parent_id) REFERENCES objects(object_id)
 );
@@ -74,6 +75,7 @@ CREATE TABLE object_versions (
     content_hash TEXT NOT NULL,
     mime_type TEXT,
     topic TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
     created_at DATETIME NOT NULL,
     PRIMARY KEY (object_id, version),
     UNIQUE (object_id, content_hash),
@@ -98,7 +100,39 @@ CREATE TABLE import_diagnostics (
 
 CREATE INDEX idx_import_diagnostics_import ON import_diagnostics(import_id);
 
-INSERT INTO schema_migrations(version, applied_at)
-VALUES (2, CURRENT_TIMESTAMP);
+CREATE TABLE blobs (
+    blob_id TEXT PRIMARY KEY,
+    sha256 TEXT NOT NULL UNIQUE,
+    byte_size INTEGER NOT NULL CHECK (byte_size >= 0),
+    mime_type TEXT,
+    created_at DATETIME NOT NULL
+);
 
-PRAGMA user_version = 2;
+CREATE TABLE attachments (
+    object_id TEXT PRIMARY KEY,
+    blob_id TEXT NOT NULL,
+    created_at DATETIME NOT NULL,
+    FOREIGN KEY (object_id) REFERENCES objects(object_id),
+    FOREIGN KEY (blob_id) REFERENCES blobs(blob_id)
+);
+
+CREATE INDEX idx_attachments_blob ON attachments(blob_id);
+
+CREATE TABLE blob_locations (
+    location_id TEXT PRIMARY KEY,
+    object_id TEXT NOT NULL,
+    blob_id TEXT NOT NULL,
+    raw_uri TEXT NOT NULL,
+    created_at DATETIME NOT NULL,
+    UNIQUE (object_id, raw_uri),
+    FOREIGN KEY (object_id) REFERENCES objects(object_id),
+    FOREIGN KEY (blob_id) REFERENCES blobs(blob_id)
+);
+
+CREATE INDEX idx_blob_locations_blob ON blob_locations(blob_id);
+CREATE INDEX idx_blob_locations_object ON blob_locations(object_id);
+
+INSERT INTO schema_migrations(version, applied_at)
+VALUES (3, CURRENT_TIMESTAMP);
+
+PRAGMA user_version = 3;

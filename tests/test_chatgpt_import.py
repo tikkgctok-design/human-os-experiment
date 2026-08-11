@@ -161,7 +161,7 @@ def test_v1_database_is_migrated_without_rewriting_existing_rows(
 
     assert result["objects_inserted"] == 6
     with sqlite3.connect(db) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
         assert conn.execute(
             "SELECT COUNT(*) FROM objects WHERE object_id = 'legacy'"
         ).fetchone()[0] == 1
@@ -171,4 +171,11 @@ def test_v1_database_is_migrated_without_rewriting_existing_rows(
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             ).fetchall()
         }
-    assert {"import_runs", "object_versions", "import_diagnostics"} <= tables
+    assert {
+        "import_runs",
+        "object_versions",
+        "import_diagnostics",
+        "attachments",
+        "blobs",
+        "blob_locations",
+    } <= tables

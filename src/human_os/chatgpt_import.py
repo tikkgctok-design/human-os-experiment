@@ -18,11 +18,11 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .ids import object_id, relation_id
+from .schema import ensure_schema
 
 SOURCE_CONVERSATION = "chatgpt.conversation"
 SOURCE_NODE = "chatgpt.node"
 SOURCE_MESSAGE = "chatgpt.message"
-SCHEMA_VERSION = 2
 
 
 def _iso_from_unix(value: Any) -> str | None:
@@ -44,77 +44,7 @@ def _now() -> str:
 
 
 def _ensure_schema(conn: sqlite3.Connection, schema_path: Path) -> None:
-    exists = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'objects'"
-    ).fetchone()
-    if not exists:
-        conn.executescript(schema_path.read_text(encoding="utf-8"))
-        return
-    _migrate_schema(conn)
-
-
-def _migrate_schema(conn: sqlite3.Connection) -> None:
-    """Upgrade a v1 structural index in place without rewriting its objects."""
-    conn.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS schema_migrations (
-            version INTEGER PRIMARY KEY, applied_at DATETIME NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS import_runs (
-            import_id TEXT PRIMARY KEY,
-            source TEXT NOT NULL,
-            raw_uri TEXT NOT NULL,
-            source_hash TEXT NOT NULL,
-            started_at DATETIME NOT NULL,
-            completed_at DATETIME,
-            status TEXT NOT NULL CHECK (status IN ('running', 'complete', 'failed')),
-            stats_json TEXT,
-            error TEXT
-        );
-        CREATE INDEX IF NOT EXISTS idx_import_runs_source_hash
-            ON import_runs(source, source_hash);
-        CREATE TABLE IF NOT EXISTS object_versions (
-            object_id TEXT NOT NULL,
-            version INTEGER NOT NULL,
-            import_id TEXT NOT NULL,
-            object_type TEXT NOT NULL,
-            occurred_at DATETIME,
-            captured_at DATETIME NOT NULL,
-            parent_id TEXT,
-            raw_uri TEXT NOT NULL,
-            content_hash TEXT NOT NULL,
-            mime_type TEXT,
-            topic TEXT,
-            created_at DATETIME NOT NULL,
-            PRIMARY KEY (object_id, version),
-            UNIQUE (object_id, content_hash),
-            FOREIGN KEY (object_id) REFERENCES objects(object_id),
-            FOREIGN KEY (import_id) REFERENCES import_runs(import_id),
-            FOREIGN KEY (parent_id) REFERENCES objects(object_id)
-        );
-        CREATE INDEX IF NOT EXISTS idx_object_versions_import
-            ON object_versions(import_id);
-        CREATE INDEX IF NOT EXISTS idx_object_versions_hash
-            ON object_versions(content_hash);
-        CREATE TABLE IF NOT EXISTS import_diagnostics (
-            diagnostic_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            import_id TEXT NOT NULL,
-            severity TEXT NOT NULL CHECK (severity IN ('warning', 'error')),
-            code TEXT NOT NULL,
-            source_id TEXT,
-            detail TEXT NOT NULL,
-            created_at DATETIME NOT NULL,
-            FOREIGN KEY (import_id) REFERENCES import_runs(import_id)
-        );
-        CREATE INDEX IF NOT EXISTS idx_import_diagnostics_import
-            ON import_diagnostics(import_id);
-        """
-    )
-    conn.execute(
-        "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
-        (SCHEMA_VERSION, _now()),
-    )
-    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    ensure_schema(conn, schema_path)
 
 
 def _upsert_object(
