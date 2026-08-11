@@ -22,6 +22,8 @@
 - [x] Add canonical identity-first ingestion for photo, video, audio, note and message.
 - [x] Add schema v3 attachments, deduplicated blobs and idempotent RAW locations.
 - [ ] Normalize special ChatGPT content and attachment references.
+- [x] Add a derived, idempotent EXIF/video metadata extraction layer.
+- [x] Populate `occurred_at` only from high-confidence timezone-aware metadata.
 
 ## Milestone 2 — Retrieval proof
 
@@ -33,7 +35,7 @@
 
 - [ ] Ingest the photo archive using the canonical identity layer (hashing and metadata
   storage primitives are implemented).
-- [ ] Extract EXIF time, GPS and device metadata where available.
+- [x] Extract EXIF/video time, GPS, dimensions, camera and codec metadata with diagnostics.
 - [ ] Add duplicate detection and similarity clustering.
 - [ ] Add selective visual analysis.
 - [ ] Link photos to chats and reconstructed events.

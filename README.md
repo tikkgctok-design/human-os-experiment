@@ -36,6 +36,19 @@ read-only and hashed in chunks; notes and messages may provide immutable source 
 directly. Metadata is stored as canonical JSON in `objects.metadata_json` and versioned
 alongside the object state.
 
+## Derived media metadata
+
+`human_os.metadata_extraction.extract_media_metadata` adds a rebuildable metadata
+projection above identity ingestion. Schema v4 stores extractor-versioned results in
+`metadata_extractions` and diagnostics in `metadata_diagnostics`; neither object nor
+blob identity is derived from EXIF or media tags.
+
+Photo extraction uses Pillow for EXIF dates, timezone offsets, GPS, camera make/model,
+orientation and dimensions. Video extraction uses MediaInfo for embedded creation
+times, duration, dimensions, codec/container fields and supported ISO 6709 locations.
+Canonical `occurred_at` is populated only from an unambiguous timezone-aware source.
+Missing, naive or conflicting timestamps remain null and produce diagnostics.
+
 Run an import from an installed development environment:
 
 ```console

@@ -132,7 +132,44 @@ CREATE TABLE blob_locations (
 CREATE INDEX idx_blob_locations_blob ON blob_locations(blob_id);
 CREATE INDEX idx_blob_locations_object ON blob_locations(object_id);
 
-INSERT INTO schema_migrations(version, applied_at)
-VALUES (3, CURRENT_TIMESTAMP);
+CREATE TABLE metadata_extractions (
+    extraction_id TEXT PRIMARY KEY,
+    object_id TEXT NOT NULL,
+    blob_id TEXT NOT NULL,
+    extractor_id TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('complete', 'partial', 'failed')),
+    metadata_json TEXT NOT NULL,
+    occurred_at TEXT,
+    occurred_at_source TEXT,
+    occurred_at_confidence TEXT NOT NULL CHECK (
+        occurred_at_confidence IN ('high', 'none')
+    ),
+    extracted_at DATETIME NOT NULL,
+    UNIQUE (object_id, blob_id, extractor_id),
+    FOREIGN KEY (object_id) REFERENCES objects(object_id),
+    FOREIGN KEY (blob_id) REFERENCES blobs(blob_id)
+);
 
-PRAGMA user_version = 3;
+CREATE INDEX idx_metadata_extractions_object
+    ON metadata_extractions(object_id);
+CREATE INDEX idx_metadata_extractions_blob
+    ON metadata_extractions(blob_id);
+
+CREATE TABLE metadata_diagnostics (
+    diagnostic_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    extraction_id TEXT NOT NULL,
+    severity TEXT NOT NULL CHECK (severity IN ('warning', 'error')),
+    code TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    created_at DATETIME NOT NULL,
+    UNIQUE (extraction_id, code, detail),
+    FOREIGN KEY (extraction_id) REFERENCES metadata_extractions(extraction_id)
+);
+
+CREATE INDEX idx_metadata_diagnostics_extraction
+    ON metadata_diagnostics(extraction_id);
+
+INSERT INTO schema_migrations(version, applied_at)
+VALUES (4, CURRENT_TIMESTAMP);
+
+PRAGMA user_version = 4;
