@@ -2,7 +2,7 @@
 
 This first importer is intentionally structural: it registers conversations,
 mapping nodes, messages, parent edges, and containment relations without asking
-an AI model whether an object is important.  RAW remains external and immutable;
+an AI model whether an object is important. RAW remains external and immutable;
 the database stores stable identities plus pointers back to RAW.
 """
 
@@ -39,6 +39,14 @@ def _sha256_json(value: Any) -> str:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _ensure_schema(conn: sqlite3.Connection, schema_path: Path) -> None:
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'objects'"
+    ).fetchone()
+    if not exists:
+        conn.executescript(schema_path.read_text(encoding="utf-8"))
 
 
 def _insert_object(
@@ -114,7 +122,10 @@ def _iter_conversations(payload: Any) -> Iterable[dict[str, Any]]:
                 if isinstance(item, dict):
                     yield item
             return
-    raise ValueError("Expected official ChatGPT conversations JSON as a list or {'conversations': [...]} object")
+    raise ValueError(
+        "Expected official ChatGPT conversations JSON as a list or "
+        "{'conversations': [...]} object"
+    )
 
 
 def import_chatgpt_export(
@@ -130,13 +141,15 @@ def import_chatgpt_export(
     conn = sqlite3.connect(database_path)
     try:
         conn.execute("PRAGMA foreign_keys = ON")
-        conn.executescript(schema_path.read_text(encoding="utf-8"))
+        _ensure_schema(conn, schema_path)
 
         stats = {"conversations": 0, "nodes": 0, "messages": 0, "relations": 0}
 
         with conn:
             for conversation in _iter_conversations(payload):
-                conv_source_id = str(conversation.get("conversation_id") or conversation.get("id") or "")
+                conv_source_id = str(
+                    conversation.get("conversation_id") or conversation.get("id") or ""
+                )
                 if not conv_source_id:
                     raise ValueError("Conversation is missing conversation_id/id")
 
@@ -160,19 +173,21 @@ def import_chatgpt_export(
                 if not isinstance(mapping, dict):
                     continue
 
-                # Node IDs are deterministic, so parent references can be assigned
-                # before parent rows are encountered in the JSON mapping order.
                 node_oids = {
                     str(node_id): object_id(SOURCE_NODE, str(node_id))
                     for node_id in mapping.keys()
                 }
 
-                # Insert nodes first without parent_id so arbitrary mapping order never
-                # violates SQLite foreign keys. Parent edges are then attached below.
+                # Insert all nodes before applying parent links. Mapping order is not
+                # guaranteed to be parent-first in an official export.
                 for node_id, node in mapping.items():
                     node_id = str(node_id)
                     node = node if isinstance(node, dict) else {}
-                    message = node.get("message") if isinstance(node.get("message"), dict) else None
+                    message = (
+                        node.get("message")
+                        if isinstance(node.get("message"), dict)
+                        else None
+                    )
                     node_oid = node_oids[node_id]
                     _insert_object(
                         conn,
@@ -180,7 +195,9 @@ def import_chatgpt_export(
                         object_type="chatgpt_node",
                         source=SOURCE_NODE,
                         source_id=node_id,
-                        occurred_at=_iso_from_unix(message.get("create_time") if message else None),
+                        occurred_at=_iso_from_unix(
+                            message.get("create_time") if message else None
+                        ),
                         captured_at=captured_at,
                         parent_id=None,
                         raw_uri=f"{raw_base}#conversation={conv_source_id}&node={node_id}",
@@ -201,9 +218,17 @@ def import_chatgpt_export(
                         message_id = str(message.get("id") or "")
                         if message_id:
                             msg_oid = object_id(SOURCE_MESSAGE, message_id)
-                            author = message.get("author") if isinstance(message.get("author"), dict) else {}
+                            author = (
+                                message.get("author")
+                                if isinstance(message.get("author"), dict)
+                                else {}
+                            )
                             role = str(author.get("role") or "unknown")
-                            content = message.get("content") if isinstance(message.get("content"), dict) else {}
+                            content = (
+                                message.get("content")
+                                if isinstance(message.get("content"), dict)
+                                else {}
+                            )
                             content_type = str(content.get("content_type") or "unknown")
                             _insert_object(
                                 conn,
@@ -231,7 +256,6 @@ def import_chatgpt_export(
                             stats["messages"] += 1
                             stats["relations"] += 1
 
-                # Parent graph is applied after all node objects exist.
                 for node_id, node in mapping.items():
                     node_id = str(node_id)
                     node = node if isinstance(node, dict) else {}
@@ -244,7 +268,8 @@ def import_chatgpt_export(
                     if parent_oid is None:
                         continue
                     conn.execute(
-                        "UPDATE objects SET parent_id = ? WHERE object_id = ? AND parent_id IS NULL",
+                        "UPDATE objects SET parent_id = ? "
+                        "WHERE object_id = ? AND parent_id IS NULL",
                         (parent_oid, child_oid),
                     )
                     _insert_relation(
@@ -262,7 +287,9 @@ def import_chatgpt_export(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Import ChatGPT conversations.json into Human OS SQLite")
+    parser = argparse.ArgumentParser(
+        description="Import ChatGPT conversations.json into Human OS SQLite"
+    )
     parser.add_argument("conversations_json", type=Path)
     parser.add_argument("database", type=Path)
     parser.add_argument(
