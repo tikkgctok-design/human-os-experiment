@@ -1,0 +1,39 @@
+# Human OS private/local data
+raw/
+private/
+secrets/
+exports/
+*.db
+*.sqlite
+*.sqlite3
+*.zip
+*.7z
+*.tar
+*.gz
+*.env
+.env.*
+
+# Personal/media files
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.heic
+*.mp4
+*.mov
+*.m4a
+*.mp3
+*.wav
+*.pdf
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
