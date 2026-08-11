@@ -1,0 +1,47 @@
+[
+  {
+    "conversation_id": "conv_demo_001",
+    "title": "Synthetic Human OS demo",
+    "create_time": 1786410000,
+    "update_time": 1786410060,
+    "current_node": "node_assistant",
+    "mapping": {
+      "node_root": {
+        "id": "node_root",
+        "parent": null,
+        "children": ["node_user"],
+        "message": null
+      },
+      "node_user": {
+        "id": "node_user",
+        "parent": "node_root",
+        "children": ["node_assistant"],
+        "message": {
+          "id": "msg_user_001",
+          "author": {"role": "user"},
+          "create_time": 1786410010,
+          "content": {
+            "content_type": "text",
+            "parts": ["Build a reconstructible memory system."]
+          },
+          "metadata": {}
+        }
+      },
+      "node_assistant": {
+        "id": "node_assistant",
+        "parent": "node_user",
+        "children": [],
+        "message": {
+          "id": "msg_assistant_001",
+          "author": {"role": "assistant"},
+          "create_time": 1786410020,
+          "content": {
+            "content_type": "text",
+            "parts": ["Preserve RAW and build derived layers above it."]
+          },
+          "metadata": {}
+        }
+      }
+    }
+  }
+]
