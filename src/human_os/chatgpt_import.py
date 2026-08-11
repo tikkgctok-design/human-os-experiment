@@ -65,12 +65,11 @@ def _insert_object(
 ) -> None:
     conn.execute(
         """
-        INSERT INTO objects (
+        INSERT OR IGNORE INTO objects (
             object_id, object_type, source, source_id, occurred_at, captured_at,
             parent_id, raw_uri, content_hash, mime_type, topic, event_id,
             confidence, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
-        ON CONFLICT(source, source_id) DO NOTHING
         """,
         (
             object_id_value,
