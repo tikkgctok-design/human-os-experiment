@@ -53,3 +53,46 @@ Vector search may be used inside the index, but semantic similarity alone is not
 ## Rebuildability
 
 Derived layers such as embeddings, episodes, summaries, MASTER and CURRENT should be replaceable and recomputable. The long-term asset is the person's preserved source data plus stable identity and provenance.
+
+## Person-centered environment model
+
+Human OS is not the AI model and it is not any particular device. It is the personal digital environment between the person, their devices, their long-term memory and replaceable AI systems.
+
+Its role is to receive multimodal information from the person and their devices, preserve and structure that information with provenance, maintain long-term life context, retrieve only the context relevant to the current situation, and make that context available to the appropriate AI system.
+
+The architectural boundary is:
+
+```text
+PERSON
+  ↕
+SENSOR / INTERFACE LAYER
+phone • headset • glasses • watch • cameras • other sensors
+  ↕
+HUMAN OS
+identity • permissions • context • provenance • memory
+  ↕
+LIFE MEMORY / RETRIEVAL
+objects • events • people • places • photos • documents • timeline
+  ↕
+AI ROUTER / REPLACEABLE INTELLIGENCE
+GPT • Gemini • local models • future models
+  ↕
+ACTION LAYER
+calendar • reminders • apps • devices • other permitted actions
+  ↕
+PERSON
+```
+
+### Architectural distinction
+
+- **Human OS** = the person's environment, memory, context, identity, permissions and rules.
+- **AI models** = replaceable intelligence engines that Human OS may call when reasoning or generation is needed.
+- **Devices** = replaceable sensor and interaction interfaces that provide input to Human OS and deliver output back to the person.
+
+Human OS therefore does not place the person's memory inside one AI provider. It places replaceable AI systems around the person's persistent memory and life context.
+
+Short principle:
+
+> **Human OS does not put memory inside AI. Human OS puts AI around the person's memory and life.**
+
+This makes the person's preserved memory and context the stable center of the architecture while models, devices and service providers remain replaceable components.
