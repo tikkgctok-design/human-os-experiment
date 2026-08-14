@@ -28,8 +28,8 @@ fails, and performs a clean coordinated shutdown on `Ctrl+C` or task termination
 For unattended startup, create a Windows Task Scheduler entry manually with:
 
 - Program: `powershell.exe`
-- Arguments: `-NoProfile -ExecutionPolicy Bypass -File "C:\GitHub\human-os-experiment\scripts\Start-HumanOSTool.ps1"`
-- Start in: `C:\GitHub\human-os-experiment`
+- Arguments: `-NoProfile -ExecutionPolicy Bypass -File "YOUR_REPOSITORY_PATH\scripts\Start-HumanOSTool.ps1"`
+- Start in: `YOUR_REPOSITORY_PATH`
 - Run whether the user is logged on or not;
 - Restart on failure;
 - Trigger at system startup or user logon, according to the storage availability.
