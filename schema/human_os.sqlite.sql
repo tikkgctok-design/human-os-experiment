@@ -169,7 +169,93 @@ CREATE TABLE metadata_diagnostics (
 CREATE INDEX idx_metadata_diagnostics_extraction
     ON metadata_diagnostics(extraction_id);
 
-INSERT INTO schema_migrations(version, applied_at)
-VALUES (4, CURRENT_TIMESTAMP);
+CREATE TABLE semantic_results (
+    semantic_result_id TEXT PRIMARY KEY,
+    object_id TEXT NOT NULL,
+    source_blob_id TEXT,
+    source_content_hash TEXT NOT NULL,
+    extractor_name TEXT NOT NULL,
+    extractor_version TEXT NOT NULL,
+    semantic_type TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (
+        status IN ('complete', 'partial', 'unsupported', 'failed')
+    ),
+    confidence REAL CHECK (
+        confidence IS NULL OR (confidence >= 0.0 AND confidence <= 1.0)
+    ),
+    result_json TEXT,
+    result_text TEXT,
+    diagnostics_json TEXT NOT NULL DEFAULT '[]',
+    provenance_json TEXT NOT NULL,
+    is_current INTEGER NOT NULL DEFAULT 1 CHECK (is_current IN (0, 1)),
+    created_at DATETIME NOT NULL,
+    FOREIGN KEY (object_id) REFERENCES objects(object_id),
+    FOREIGN KEY (source_blob_id) REFERENCES blobs(blob_id)
+);
 
-PRAGMA user_version = 4;
+CREATE UNIQUE INDEX idx_semantic_results_identity
+    ON semantic_results (
+        object_id, extractor_name, extractor_version, semantic_type,
+        source_content_hash, COALESCE(source_blob_id, '')
+    );
+CREATE INDEX idx_semantic_results_object ON semantic_results(object_id);
+CREATE INDEX idx_semantic_results_current
+    ON semantic_results(object_id, semantic_type, is_current);
+CREATE UNIQUE INDEX idx_semantic_results_one_current
+    ON semantic_results(object_id, extractor_name, semantic_type)
+    WHERE is_current = 1;
+
+CREATE TABLE semantic_relations (
+    semantic_relation_id TEXT PRIMARY KEY,
+    object_id TEXT NOT NULL,
+    semantic_result_id TEXT NOT NULL,
+    relation_type TEXT NOT NULL CHECK (
+        relation_type IN (
+            'object_has_semantic_result', 'semantic_mentions_entity',
+            'semantic_mentions_place', 'semantic_mentions_person',
+            'semantic_mentions_topic'
+        )
+    ),
+    target_ref TEXT NOT NULL DEFAULT '',
+    confidence REAL CHECK (
+        confidence IS NULL OR (confidence >= 0.0 AND confidence <= 1.0)
+    ),
+    created_at DATETIME NOT NULL,
+    UNIQUE (semantic_result_id, relation_type, target_ref),
+    FOREIGN KEY (object_id) REFERENCES objects(object_id),
+    FOREIGN KEY (semantic_result_id)
+        REFERENCES semantic_results(semantic_result_id)
+);
+
+CREATE INDEX idx_semantic_relations_object ON semantic_relations(object_id);
+CREATE INDEX idx_semantic_relations_result
+    ON semantic_relations(semantic_result_id);
+CREATE INDEX idx_semantic_relations_type ON semantic_relations(relation_type);
+
+CREATE TABLE event_evidence (
+    event_evidence_id TEXT PRIMARY KEY,
+    object_id TEXT NOT NULL,
+    semantic_result_id TEXT,
+    evidence_type TEXT NOT NULL CHECK (
+        evidence_type IN (
+            'time', 'gps', 'visual_similarity', 'person', 'text_context',
+            'temporal_neighbor'
+        )
+    ),
+    evidence_json TEXT NOT NULL,
+    confidence REAL CHECK (
+        confidence IS NULL OR (confidence >= 0.0 AND confidence <= 1.0)
+    ),
+    created_at DATETIME NOT NULL,
+    FOREIGN KEY (object_id) REFERENCES objects(object_id),
+    FOREIGN KEY (semantic_result_id)
+        REFERENCES semantic_results(semantic_result_id)
+);
+
+CREATE INDEX idx_event_evidence_object ON event_evidence(object_id);
+CREATE INDEX idx_event_evidence_type ON event_evidence(evidence_type);
+
+INSERT INTO schema_migrations(version, applied_at)
+VALUES (5, CURRENT_TIMESTAMP);
+
+PRAGMA user_version = 5;

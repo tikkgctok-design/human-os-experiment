@@ -6,7 +6,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 def _now() -> str:
@@ -18,7 +18,7 @@ def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
 
 
 def ensure_schema(conn: sqlite3.Connection, schema_path: Path) -> None:
-    """Create the canonical schema or migrate an existing index to v4."""
+    """Create the canonical schema or migrate an existing index to v5."""
     exists = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'objects'"
     ).fetchone()
@@ -159,6 +159,94 @@ def ensure_schema(conn: sqlite3.Connection, schema_path: Path) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_metadata_diagnostics_extraction
             ON metadata_diagnostics(extraction_id);
+        CREATE TABLE IF NOT EXISTS semantic_results (
+            semantic_result_id TEXT PRIMARY KEY,
+            object_id TEXT NOT NULL,
+            source_blob_id TEXT,
+            source_content_hash TEXT NOT NULL,
+            extractor_name TEXT NOT NULL,
+            extractor_version TEXT NOT NULL,
+            semantic_type TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (
+                status IN ('complete', 'partial', 'unsupported', 'failed')
+            ),
+            confidence REAL CHECK (
+                confidence IS NULL OR
+                (confidence >= 0.0 AND confidence <= 1.0)
+            ),
+            result_json TEXT,
+            result_text TEXT,
+            diagnostics_json TEXT NOT NULL DEFAULT '[]',
+            provenance_json TEXT NOT NULL,
+            is_current INTEGER NOT NULL DEFAULT 1 CHECK (is_current IN (0, 1)),
+            created_at DATETIME NOT NULL,
+            FOREIGN KEY (object_id) REFERENCES objects(object_id),
+            FOREIGN KEY (source_blob_id) REFERENCES blobs(blob_id)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_semantic_results_identity
+            ON semantic_results (
+                object_id, extractor_name, extractor_version, semantic_type,
+                source_content_hash, COALESCE(source_blob_id, '')
+            );
+        CREATE INDEX IF NOT EXISTS idx_semantic_results_object
+            ON semantic_results(object_id);
+        CREATE INDEX IF NOT EXISTS idx_semantic_results_current
+            ON semantic_results(object_id, semantic_type, is_current);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_semantic_results_one_current
+            ON semantic_results(object_id, extractor_name, semantic_type)
+            WHERE is_current = 1;
+        CREATE TABLE IF NOT EXISTS semantic_relations (
+            semantic_relation_id TEXT PRIMARY KEY,
+            object_id TEXT NOT NULL,
+            semantic_result_id TEXT NOT NULL,
+            relation_type TEXT NOT NULL CHECK (
+                relation_type IN (
+                    'object_has_semantic_result', 'semantic_mentions_entity',
+                    'semantic_mentions_place', 'semantic_mentions_person',
+                    'semantic_mentions_topic'
+                )
+            ),
+            target_ref TEXT NOT NULL DEFAULT '',
+            confidence REAL CHECK (
+                confidence IS NULL OR
+                (confidence >= 0.0 AND confidence <= 1.0)
+            ),
+            created_at DATETIME NOT NULL,
+            UNIQUE (semantic_result_id, relation_type, target_ref),
+            FOREIGN KEY (object_id) REFERENCES objects(object_id),
+            FOREIGN KEY (semantic_result_id)
+                REFERENCES semantic_results(semantic_result_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_semantic_relations_object
+            ON semantic_relations(object_id);
+        CREATE INDEX IF NOT EXISTS idx_semantic_relations_result
+            ON semantic_relations(semantic_result_id);
+        CREATE INDEX IF NOT EXISTS idx_semantic_relations_type
+            ON semantic_relations(relation_type);
+        CREATE TABLE IF NOT EXISTS event_evidence (
+            event_evidence_id TEXT PRIMARY KEY,
+            object_id TEXT NOT NULL,
+            semantic_result_id TEXT,
+            evidence_type TEXT NOT NULL CHECK (
+                evidence_type IN (
+                    'time', 'gps', 'visual_similarity', 'person',
+                    'text_context', 'temporal_neighbor'
+                )
+            ),
+            evidence_json TEXT NOT NULL,
+            confidence REAL CHECK (
+                confidence IS NULL OR
+                (confidence >= 0.0 AND confidence <= 1.0)
+            ),
+            created_at DATETIME NOT NULL,
+            FOREIGN KEY (object_id) REFERENCES objects(object_id),
+            FOREIGN KEY (semantic_result_id)
+                REFERENCES semantic_results(semantic_result_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_event_evidence_object
+            ON event_evidence(object_id);
+        CREATE INDEX IF NOT EXISTS idx_event_evidence_type
+            ON event_evidence(evidence_type);
         """
     )
     conn.execute(
