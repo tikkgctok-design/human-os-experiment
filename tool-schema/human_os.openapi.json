@@ -1,0 +1,245 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Human OS Private Memory Tools",
+    "version": "1.0.0",
+    "description": "Search the user's private Human OS memory using natural-language queries. Read-only. Returns ranked canonical objects and evidence. Does not modify memory or expose RAW files."
+  },
+  "servers": [
+    {
+      "url": "https://human-os.example.com",
+      "description": "Template origin; render the private import copy with the stable production HTTPS origin"
+    }
+  ],
+  "security": [
+    {"bearerAuth": []}
+  ],
+  "paths": {
+    "/v1/search": {
+      "post": {
+        "operationId": "human_os_search",
+        "x-openai-isConsequential": false,
+        "summary": "Search private Human OS memory",
+        "description": "Search the user's private Human OS memory using natural-language queries. Read-only. Returns ranked canonical objects and evidence. Does not modify memory or expose RAW files.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["query"],
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000,
+                    "description": "Natural-language private-memory query",
+                    "examples": [
+                      "найди где я на снегу",
+                      "найди фотографии со снегом",
+                      "найди фото с вывеской",
+                      "найди фотографии из одного места"
+                    ]
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 10
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ranked canonical Human OS objects with compact evidence",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/SearchToolResponse"}
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error"},
+          "401": {"$ref": "#/components/responses/Error"},
+          "413": {"$ref": "#/components/responses/Error"},
+          "426": {"$ref": "#/components/responses/Error"},
+          "429": {"$ref": "#/components/responses/Error"},
+          "502": {"$ref": "#/components/responses/Error"},
+          "503": {"$ref": "#/components/responses/Error"},
+          "504": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/v1/object/{object_id}": {
+      "get": {
+        "operationId": "human_os_get_object",
+        "x-openai-isConsequential": false,
+        "summary": "Get a safe canonical Human OS object view",
+        "description": "Read one canonical object and derived evidence by stable object_id. Never returns RAW files or local filesystem paths.",
+        "parameters": [
+          {
+            "name": "object_id",
+            "in": "path",
+            "required": true,
+            "schema": {"type": "string", "pattern": "^hos_obj_[0-9a-f]{32}$"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Safe canonical object view",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ObjectToolResponse"}
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error"},
+          "401": {"$ref": "#/components/responses/Error"},
+          "404": {"$ref": "#/components/responses/Error"},
+          "426": {"$ref": "#/components/responses/Error"},
+          "429": {"$ref": "#/components/responses/Error"},
+          "502": {"$ref": "#/components/responses/Error"},
+          "503": {"$ref": "#/components/responses/Error"},
+          "504": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/bridge/health": {
+      "get": {
+        "operationId": "human_os_health",
+        "x-openai-isConsequential": false,
+        "summary": "Check Human OS bridge health",
+        "description": "Read-only health check for the bridge and Local API. The bridge never opens SQLite directly.",
+        "responses": {
+          "200": {
+            "description": "Bridge health status",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/HealthToolResponse"}
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error"},
+          "426": {"$ref": "#/components/responses/Error"},
+          "429": {"$ref": "#/components/responses/Error"},
+          "502": {"$ref": "#/components/responses/Error"},
+          "503": {"$ref": "#/components/responses/Error"},
+          "504": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "opaque-256-bit-token"
+      }
+    },
+    "schemas": {
+      "Evidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "value", "confidence", "is_fact", "assessment"],
+        "properties": {
+          "type": {"type": "string", "enum": ["caption", "ocr", "object", "place", "metadata"]},
+          "value": {"type": "string"},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "is_fact": {"type": "boolean"},
+          "assessment": {"type": "string", "enum": ["fact", "candidate", "inference"]}
+        }
+      },
+      "SearchResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["object_id", "score", "occurred_at", "media_type", "safe_ref", "reason", "matched_evidence"],
+        "properties": {
+          "object_id": {"type": "string", "pattern": "^hos_obj_[0-9a-f]{32}$"},
+          "score": {"type": "number", "minimum": 0, "maximum": 1},
+          "occurred_at": {"type": ["string", "null"]},
+          "media_type": {"type": "string", "enum": ["photo"]},
+          "safe_ref": {"type": "string", "pattern": "^human-os://object/"},
+          "reason": {"type": "string"},
+          "matched_evidence": {"type": "array", "items": {"$ref": "#/components/schemas/Evidence"}}
+        }
+      },
+      "SearchToolResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["query", "results", "warnings", "request_id"],
+        "properties": {
+          "query": {"type": "string"},
+          "results": {"type": "array", "items": {"$ref": "#/components/schemas/SearchResult"}},
+          "warnings": {"type": "array", "items": {"type": "string"}},
+          "request_id": {"type": "string", "format": "uuid"}
+        }
+      },
+      "ObjectView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["object_id", "media_type", "occurred_at", "captured_at", "mime_type", "safe_ref", "evidence"],
+        "properties": {
+          "object_id": {"type": "string", "pattern": "^hos_obj_[0-9a-f]{32}$"},
+          "media_type": {"type": "string", "enum": ["photo", "video", "audio", "note", "message"]},
+          "occurred_at": {"type": ["string", "null"]},
+          "captured_at": {"type": ["string", "null"]},
+          "mime_type": {"type": ["string", "null"]},
+          "safe_ref": {"type": "string", "pattern": "^human-os://object/hos_obj_[0-9a-f]{32}$"},
+          "evidence": {"type": "array", "items": {"$ref": "#/components/schemas/Evidence"}}
+        }
+      },
+      "ObjectToolResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["object", "request_id"],
+        "properties": {
+          "object": {"$ref": "#/components/schemas/ObjectView"},
+          "request_id": {"type": "string", "format": "uuid"}
+        }
+      },
+      "HealthToolResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ok", "bridge_alive", "local_api_reachable", "bridge_opens_database", "request_id"],
+        "properties": {
+          "ok": {"type": "boolean", "const": true},
+          "bridge_alive": {"type": "boolean"},
+          "local_api_reachable": {"type": "boolean"},
+          "bridge_opens_database": {"type": "boolean", "const": false},
+          "request_id": {"type": "string", "format": "uuid"}
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ok", "error"],
+        "properties": {
+          "ok": {"type": "boolean", "const": false},
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "message"],
+            "properties": {
+              "type": {"type": "string"},
+              "message": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Normalized tool error",
+        "content": {
+          "application/json": {
+            "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+          }
+        }
+      }
+    }
+  }
+}
