@@ -33,7 +33,7 @@ class SourcePhoto:
     source_kind: str
     name: str
     mime_type: str
-    byte_size: int
+    byte_size: int | None
     modified_at: datetime
     raw_uri: str
     content_hash: str | None = None
@@ -42,7 +42,7 @@ class SourcePhoto:
     def __post_init__(self) -> None:
         if not self.source_id or not self.source_kind or not self.name or not self.raw_uri:
             raise ValueError("source identity, kind, name and raw URI are required")
-        if self.byte_size < 0:
+        if self.byte_size is not None and self.byte_size < 0:
             raise ValueError("byte_size must not be negative")
         if self.modified_at.tzinfo is None:
             raise ValueError("modified_at must be timezone-aware")

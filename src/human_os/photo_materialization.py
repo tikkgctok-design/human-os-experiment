@@ -83,7 +83,7 @@ def materialize_photo(
                     byte_size += len(chunk)
 
         content_hash = digest.hexdigest()
-        if byte_size != photo.byte_size:
+        if photo.byte_size is not None and byte_size != photo.byte_size:
             raise ValueError(
                 f"materialized byte_size mismatch: expected {photo.byte_size}, got {byte_size}"
             )
