@@ -277,6 +277,8 @@ def extract_media_metadata(
     object_id: str,
     database_path: Path,
     schema_path: Path,
+    *,
+    materialized_path: Path | None = None,
 ) -> ExtractionResult:
     """Extract derived metadata without changing RAW or Human OS identity."""
     conn = sqlite3.connect(database_path)
@@ -303,7 +305,7 @@ def extract_media_metadata(
         if existing:
             return existing
 
-        path = _path_from_uri(raw_uri)
+        path = materialized_path if materialized_path is not None else _path_from_uri(raw_uri)
         try:
             if object_type == "photo":
                 metadata, occurred_at, occurred_source, diagnostics = _extract_photo(path)

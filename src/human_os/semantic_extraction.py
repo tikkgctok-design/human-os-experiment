@@ -201,6 +201,7 @@ def run_semantic_extractor(
     *,
     extractor_version: str | None = None,
     registry: ExtractorRegistry = DEFAULT_REGISTRY,
+    materialized_path: Path | None = None,
 ) -> SemanticRunResult:
     """Run one extractor without changing RAW, blob identity, or object identity."""
     spec = registry.get(extractor_name, extractor_version)
@@ -277,6 +278,7 @@ def run_semantic_extractor(
             blob_id=source_blob_id,
             canonical_metadata=_decode_json(canonical_metadata_json, {}),
             derived_metadata=derived_metadata,
+            materialized_path=materialized_path,
         )
         if object_type not in spec.object_types:
             output = SemanticOutput(

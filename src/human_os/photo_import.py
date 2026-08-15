@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import BinaryIO, Iterable
 
 from .ingestion import IngestObject, ingest_object
+from .photo_materialization import materialize_photo
 from .photo_source import LocalFolderPhotoSource, PhotoSource, SourcePhoto
 from .photo_semantic import PhotoVisionBackend, SemanticRunResult, run_photo_semantics
 
@@ -74,6 +75,7 @@ def _ingest_and_extract(
     schema_path: Path,
     *,
     backend: PhotoVisionBackend | None = None,
+    materialized_path: Path | None = None,
 ) -> PhotoImportOutcome:
     try:
         ingested = ingest_object(item, database_path, schema_path)
@@ -83,8 +85,14 @@ def _ingest_and_extract(
         )
 
     try:
+        semantic_options = {"backend": backend}
+        if materialized_path is not None:
+            semantic_options["materialized_path"] = materialized_path
         results = run_photo_semantics(
-            ingested.object_id, database_path, schema_path, backend=backend
+            ingested.object_id,
+            database_path,
+            schema_path,
+            **semantic_options,
         )
     except Exception as exc:
         return PhotoImportOutcome(
@@ -114,27 +122,29 @@ def import_source_photo(
 ) -> PhotoImportOutcome:
     """Ingest one normalized provider photo and run the existing PHOTO pipeline."""
     try:
-        with source.open_photo(photo.source_id) as stream:
-            content = stream.read()
-        if not isinstance(content, bytes):
-            raise TypeError("photo source must return a binary stream")
+        with materialize_photo(source, photo) as materialized:
+            content = materialized.path.read_bytes() if materialized.temporary else None
+            item = IngestObject(
+                object_type="photo",
+                source=photo.source_kind,
+                source_id=photo.source_id,
+                raw_uri=photo.raw_uri,
+                content=content,
+                mime_type=photo.mime_type,
+                metadata=dict(photo.metadata or {}),
+            )
+            return _ingest_and_extract(
+                item,
+                photo.name,
+                database_path,
+                schema_path,
+                backend=backend,
+                materialized_path=materialized.path,
+            )
     except Exception as exc:
         return PhotoImportOutcome(
             photo.name, None, None, None, f"{type(exc).__name__}: {exc}"
         )
-
-    item = IngestObject(
-        object_type="photo",
-        source=photo.source_kind,
-        source_id=photo.source_id,
-        raw_uri=photo.raw_uri,
-        content=content,
-        mime_type=photo.mime_type,
-        metadata=dict(photo.metadata or {}),
-    )
-    return _ingest_and_extract(
-        item, photo.name, database_path, schema_path, backend=backend
-    )
 
 
 def import_photo_source(

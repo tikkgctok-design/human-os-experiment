@@ -47,8 +47,11 @@ class ExtractionContext:
     blob_id: str | None
     canonical_metadata: dict[str, Any]
     derived_metadata: dict[str, Any] | None
+    materialized_path: Path | None = None
 
     def raw_path(self) -> Path:
+        if self.materialized_path is not None:
+            return self.materialized_path
         parsed = urlparse(self.raw_uri)
         if parsed.scheme != "file":
             raise ValueError("extractor requires a file-backed RAW URI")

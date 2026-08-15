@@ -594,9 +594,15 @@ def run_photo_semantics(
     *,
     backend: PhotoVisionBackend | None = None,
     extractor_names: tuple[str, ...] = PHOTO_EXTRACTORS,
+    materialized_path: Path | None = None,
 ) -> dict[str, SemanticRunResult]:
     """Run the four production PHOTO projections through semantic_results only."""
-    extract_media_metadata(object_id, database_path, schema_path)
+    extract_media_metadata(
+        object_id,
+        database_path,
+        schema_path,
+        materialized_path=materialized_path,
+    )
     registry = build_photo_production_registry(backend)
     return {
         name: run_semantic_extractor(
@@ -605,6 +611,7 @@ def run_photo_semantics(
             database_path,
             schema_path,
             registry=registry,
+            materialized_path=materialized_path,
         )
         for name in extractor_names
     }

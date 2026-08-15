@@ -97,7 +97,12 @@ def _counts(database: Path) -> dict[str, int]:
         }
 
 
-def _source_photo(path: Path, source_id: str) -> SourcePhoto:
+def _source_photo(
+    path: Path,
+    source_id: str,
+    *,
+    raw_uri: str | None = None,
+) -> SourcePhoto:
     stat = path.stat()
     return SourcePhoto(
         source_id=source_id,
@@ -106,7 +111,7 @@ def _source_photo(path: Path, source_id: str) -> SourcePhoto:
         mime_type="image/jpeg",
         byte_size=stat.st_size,
         modified_at=datetime.fromtimestamp(stat.st_mtime, timezone.utc),
-        raw_uri=path.resolve().as_uri(),
+        raw_uri=raw_uri or path.resolve().as_uri(),
         metadata={"provider_revision": "fixture-revision"},
     )
 
@@ -116,7 +121,11 @@ def test_ingestion_accepts_photo_source_without_provider_specific_api(
 ) -> None:
     path = tmp_path / "source.jpg"
     _make_jpeg(path)
-    photo = _source_photo(path, "remote-photo-1")
+    photo = _source_photo(
+        path,
+        "remote-photo-1",
+        raw_uri="fixture-drive://photos/remote-photo-1",
+    )
     source = FixturePhotoSource((photo,), {photo.source_id: path.read_bytes()})
     db = tmp_path / "index.sqlite"
 
@@ -132,10 +141,71 @@ def test_ingestion_accepts_photo_source_without_provider_specific_api(
     assert row[:4] == (
         "fixture.photo-provider",
         "remote-photo-1",
-        path.resolve().as_uri(),
+        "fixture-drive://photos/remote-photo-1",
         "image/jpeg",
     )
     assert "provider_revision" in row[4]
+
+
+def test_remote_photo_source_uses_temporary_path_but_keeps_canonical_uri(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "remote.jpg"
+    _make_jpeg(path)
+    remote_uri = "fixture-drive://photos/remote-photo-1"
+    photo = _source_photo(path, "remote-photo-1", raw_uri=remote_uri)
+    source = FixturePhotoSource((photo,), {photo.source_id: path.read_bytes()})
+    backend = FixtureVisionBackend()
+    db = tmp_path / "index.sqlite"
+
+    outcomes = import_photo_source(source, db, SCHEMA, backend=backend)
+
+    assert outcomes[0].error is None
+    assert outcomes[0].semantic_status == "complete"
+    assert backend.calls
+    materialized_paths = {called_path for called_path, _ in backend.calls}
+    assert all(not called_path.exists() for called_path in materialized_paths)
+    with sqlite3.connect(db) as conn:
+        canonical_uri = conn.execute("SELECT raw_uri FROM objects").fetchone()[0]
+    assert canonical_uri == remote_uri
+    database_bytes = db.read_bytes()
+    assert all(
+        called_path.name.encode() not in database_bytes
+        for called_path in materialized_paths
+    )
+
+
+def test_remote_temporary_path_is_cleaned_after_downstream_exception(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "remote.jpg"
+    _make_jpeg(path)
+    photo = _source_photo(
+        path, "remote-photo-1", raw_uri="fixture-drive://photos/remote-photo-1"
+    )
+    source = FixturePhotoSource((photo,), {photo.source_id: path.read_bytes()})
+    seen_path: Path | None = None
+
+    def fail_semantics(
+        _object_id: str,
+        _database_path: Path,
+        _schema_path: Path,
+        **options: object,
+    ) -> None:
+        nonlocal seen_path
+        seen_path = options["materialized_path"]  # type: ignore[assignment]
+        assert seen_path.is_file()
+        raise RuntimeError("downstream failed")
+
+    monkeypatch.setattr("human_os.photo_import.run_photo_semantics", fail_semantics)
+
+    outcomes = import_photo_source(
+        source, tmp_path / "index.sqlite", SCHEMA, backend=FixtureVisionBackend()
+    )
+
+    assert outcomes[0].error == "RuntimeError: downstream failed"
+    assert seen_path is not None
+    assert not seen_path.exists()
 
 
 def test_legacy_mounted_drive_folder_identity_is_preserved(tmp_path: Path) -> None:
@@ -158,18 +228,32 @@ def test_legacy_mounted_drive_folder_identity_is_preserved(tmp_path: Path) -> No
     assert metadata_json == "{}"
 
 
-def test_photo_source_open_error_is_isolated_to_its_outcome(tmp_path: Path) -> None:
+def test_photo_source_open_error_is_isolated_to_its_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     bad_path = tmp_path / "bad.jpg"
     good_path = tmp_path / "good.jpg"
     _make_jpeg(bad_path)
     _make_jpeg(good_path)
-    bad = _source_photo(bad_path, "bad")
-    good = _source_photo(good_path, "good")
+    bad = _source_photo(bad_path, "bad", raw_uri="fixture-drive://photos/bad")
+    good = _source_photo(good_path, "good", raw_uri="fixture-drive://photos/good")
     source = FixturePhotoSource(
         (bad, good),
         {bad.source_id: bad_path.read_bytes(), good.source_id: good_path.read_bytes()},
         fail_open=frozenset({bad.source_id}),
     )
+    created_paths: list[Path] = []
+
+    from human_os import photo_materialization
+
+    original_mkstemp = photo_materialization.tempfile.mkstemp
+
+    def recording_mkstemp(*args: object, **kwargs: object) -> tuple[int, str]:
+        descriptor, name = original_mkstemp(*args, **kwargs)
+        created_paths.append(Path(name))
+        return descriptor, name
+
+    monkeypatch.setattr(photo_materialization.tempfile, "mkstemp", recording_mkstemp)
 
     outcomes = import_photo_source(
         source, tmp_path / "index.sqlite", SCHEMA, backend=FixtureVisionBackend()
@@ -179,6 +263,8 @@ def test_photo_source_open_error_is_isolated_to_its_outcome(tmp_path: Path) -> N
     assert outcomes[0].error == "OSError: fixture source unavailable"
     assert outcomes[1].error is None
     assert outcomes[1].object_id is not None
+    assert created_paths
+    assert all(not path.exists() for path in created_paths)
 
 
 def test_photo_source_listing_error_is_propagated(tmp_path: Path) -> None:
@@ -332,7 +418,15 @@ def test_cli_reports_totals_and_exit_code_for_mixed_results(tmp_path: Path, caps
     _make_jpeg(folder / "good.jpg")
     calls = {"count": 0}
 
-    def fake_run_photo_semantics(object_id, database_path, schema_path, *, backend=None, extractor_names=None):
+    def fake_run_photo_semantics(
+        object_id,
+        database_path,
+        schema_path,
+        *,
+        backend=None,
+        extractor_names=None,
+        materialized_path=None,
+    ):
         calls["count"] += 1
         if calls["count"] == 1:
             raise RuntimeError("boom")
