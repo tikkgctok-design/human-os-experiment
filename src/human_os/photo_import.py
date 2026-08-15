@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Iterable
+from typing import BinaryIO, Iterable
 
 from .ingestion import IngestObject, ingest_object
+from .photo_source import LocalFolderPhotoSource, PhotoSource, SourcePhoto
 from .photo_semantic import PhotoVisionBackend, SemanticRunResult, run_photo_semantics
 
-_JPEG_SUFFIXES = frozenset({".jpg", ".jpeg"})
+_LEGACY_SOURCE = "local.photo_import"
 
 
 @dataclass(frozen=True)
@@ -23,12 +24,38 @@ class PhotoImportOutcome:
     error: str | None
 
 
-def _jpeg_files(folder: Path) -> list[Path]:
-    return sorted(
-        path
-        for path in folder.iterdir()
-        if path.is_file() and path.suffix.casefold() in _JPEG_SUFFIXES
-    )
+class _LegacyLocalFolderSource:
+    """Keep pre-PhotoSource canonical identity for the existing folder CLI."""
+
+    def __init__(self, folder: Path) -> None:
+        self._delegate = LocalFolderPhotoSource(
+            folder, source_namespace="local-photo-import"
+        )
+
+    @staticmethod
+    def _legacy(photo: SourcePhoto) -> SourcePhoto:
+        return replace(
+            photo,
+            source_id=photo.raw_uri,
+            source_kind=_LEGACY_SOURCE,
+            metadata=None,
+        )
+
+    def list_photos(self) -> tuple[SourcePhoto, ...]:
+        return tuple(self._legacy(photo) for photo in self._delegate.list_photos())
+
+    def _delegate_photo(self, source_id: str) -> SourcePhoto:
+        for photo in self._delegate.list_photos():
+            if photo.raw_uri == source_id:
+                return photo
+        raise KeyError(source_id)
+
+    def get_photo(self, source_id: str) -> SourcePhoto:
+        return self._legacy(self._delegate_photo(source_id))
+
+    def open_photo(self, source_id: str) -> BinaryIO:
+        photo = self._delegate_photo(source_id)
+        return self._delegate.open_photo(photo.source_id)
 
 
 def _semantic_status(results: dict[str, SemanticRunResult]) -> str:
@@ -40,25 +67,19 @@ def _semantic_status(results: dict[str, SemanticRunResult]) -> str:
     return "complete"
 
 
-def import_photo(
-    photo: Path,
+def _ingest_and_extract(
+    item: IngestObject,
+    filename: str,
     database_path: Path,
     schema_path: Path,
     *,
     backend: PhotoVisionBackend | None = None,
 ) -> PhotoImportOutcome:
-    """Ingest one JPEG and run PHOTO semantics; never modifies the source file."""
     try:
-        item = IngestObject(
-            object_type="photo",
-            source="local.photo_import",
-            raw_uri=photo.resolve().as_uri(),
-            mime_type="image/jpeg",
-        )
         ingested = ingest_object(item, database_path, schema_path)
     except Exception as exc:
         return PhotoImportOutcome(
-            photo.name, None, None, None, f"{type(exc).__name__}: {exc}"
+            filename, None, None, None, f"{type(exc).__name__}: {exc}"
         )
 
     try:
@@ -67,13 +88,85 @@ def import_photo(
         )
     except Exception as exc:
         return PhotoImportOutcome(
-            photo.name, ingested.object_id, ingested.outcome, None,
+            filename,
+            ingested.object_id,
+            ingested.outcome,
+            None,
             f"{type(exc).__name__}: {exc}",
         )
 
     return PhotoImportOutcome(
-        photo.name, ingested.object_id, ingested.outcome,
-        _semantic_status(results), None,
+        filename,
+        ingested.object_id,
+        ingested.outcome,
+        _semantic_status(results),
+        None,
+    )
+
+
+def import_source_photo(
+    source: PhotoSource,
+    photo: SourcePhoto,
+    database_path: Path,
+    schema_path: Path,
+    *,
+    backend: PhotoVisionBackend | None = None,
+) -> PhotoImportOutcome:
+    """Ingest one normalized provider photo and run the existing PHOTO pipeline."""
+    try:
+        with source.open_photo(photo.source_id) as stream:
+            content = stream.read()
+        if not isinstance(content, bytes):
+            raise TypeError("photo source must return a binary stream")
+    except Exception as exc:
+        return PhotoImportOutcome(
+            photo.name, None, None, None, f"{type(exc).__name__}: {exc}"
+        )
+
+    item = IngestObject(
+        object_type="photo",
+        source=photo.source_kind,
+        source_id=photo.source_id,
+        raw_uri=photo.raw_uri,
+        content=content,
+        mime_type=photo.mime_type,
+        metadata=dict(photo.metadata or {}),
+    )
+    return _ingest_and_extract(
+        item, photo.name, database_path, schema_path, backend=backend
+    )
+
+
+def import_photo_source(
+    source: PhotoSource,
+    database_path: Path,
+    schema_path: Path,
+    *,
+    backend: PhotoVisionBackend | None = None,
+) -> list[PhotoImportOutcome]:
+    """Import every photo exposed by a provider-neutral read-only source."""
+    return [
+        import_source_photo(source, photo, database_path, schema_path, backend=backend)
+        for photo in source.list_photos()
+    ]
+
+
+def import_photo(
+    photo: Path,
+    database_path: Path,
+    schema_path: Path,
+    *,
+    backend: PhotoVisionBackend | None = None,
+) -> PhotoImportOutcome:
+    """Ingest one JPEG and run PHOTO semantics; never modifies the source file."""
+    item = IngestObject(
+        object_type="photo",
+        source=_LEGACY_SOURCE,
+        raw_uri=photo.resolve().as_uri(),
+        mime_type="image/jpeg",
+    )
+    return _ingest_and_extract(
+        item, photo.name, database_path, schema_path, backend=backend
     )
 
 
@@ -85,10 +178,12 @@ def import_folder(
     backend: PhotoVisionBackend | None = None,
 ) -> list[PhotoImportOutcome]:
     """Ingest every top-level .jpg/.jpeg file in folder; never recurses."""
-    return [
-        import_photo(photo, database_path, schema_path, backend=backend)
-        for photo in _jpeg_files(folder)
-    ]
+    return import_photo_source(
+        _LegacyLocalFolderSource(folder),
+        database_path,
+        schema_path,
+        backend=backend,
+    )
 
 
 def _is_failure(outcome: PhotoImportOutcome) -> bool:
