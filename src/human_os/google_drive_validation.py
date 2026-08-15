@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 import tempfile
 from contextlib import closing
@@ -18,6 +19,11 @@ from .photo_materialization import materialize_photo
 from .photo_semantic import PhotoVisionResult
 
 MAX_LIVE_PHOTOS = 3
+
+_METADATA_BACKENDS = {
+    "human-os.photo.pillow@1": "Pillow",
+    "human-os.video.mediainfo@1": "MediaInfo",
+}
 
 
 class ValidationPhotoBackend:
@@ -66,6 +72,134 @@ def _selected(photos: tuple[Any, ...], limit: int) -> tuple[Any, ...]:
             ),
         )[:limit]
     )
+
+
+def _diagnostic_category(code: str) -> str:
+    if code.endswith(".extraction_failed"):
+        return "extractor_error"
+    if code.endswith("_missing"):
+        return "missing_metadata"
+    if code.endswith("_invalid"):
+        return "invalid_metadata"
+    if code.endswith("_conflict"):
+        return "conflicting_metadata"
+    return "metadata_warning"
+
+
+def _group_status(
+    metadata: dict[str, Any], codes: set[str], group: str
+) -> str:
+    relevant = {code for code in codes if group in code}
+    if any(code.endswith(".extraction_failed") for code in codes):
+        return "error"
+    if any(code.endswith("_conflict") for code in relevant):
+        return "conflict"
+    if any(code.endswith("_invalid") for code in relevant):
+        return "invalid"
+    if any(code.endswith("_missing") for code in relevant):
+        return "missing"
+    if group == "capture_time":
+        if "photo.timezone_missing" in codes:
+            return "partial"
+        found = bool(
+            metadata.get("date_time_original")
+            or metadata.get("date_time_digitized")
+            or metadata.get("creation_time")
+        )
+    elif group == "camera":
+        camera = metadata.get("camera") or {}
+        found = bool(camera.get("make") or camera.get("model"))
+    elif group == "orientation":
+        found = metadata.get("orientation") is not None
+    elif group == "dimensions":
+        dimensions = metadata.get("dimensions") or {}
+        found = (
+            dimensions.get("width") is not None
+            and dimensions.get("height") is not None
+        )
+    else:
+        found = metadata.get(group) is not None
+    return "found" if found else "missing"
+
+
+def metadata_diagnostic_summary(
+    conn: sqlite3.Connection, object_id: str
+) -> dict[str, Any]:
+    """Return a value-free explanation of the latest metadata status."""
+    row = conn.execute(
+        """
+        SELECT extraction_id, extractor_id, status, metadata_json
+        FROM metadata_extractions
+        WHERE object_id = ? ORDER BY extracted_at DESC LIMIT 1
+        """,
+        (object_id,),
+    ).fetchone()
+    if row is None:
+        return {
+            "extractor": None,
+            "backend": None,
+            "status": "missing",
+            "error_category": None,
+            "error_type": None,
+            "groups": {},
+            "diagnostics": [],
+        }
+    extraction_id, extractor_id, status, metadata_json = row
+    diagnostics = conn.execute(
+        """
+        SELECT severity, code, detail FROM metadata_diagnostics
+        WHERE extraction_id = ? ORDER BY diagnostic_id
+        """,
+        (extraction_id,),
+    ).fetchall()
+    codes = {item[1] for item in diagnostics}
+    metadata = json.loads(metadata_json)
+    failed = next(
+        (item for item in diagnostics if item[1].endswith(".extraction_failed")),
+        None,
+    )
+    error_type = None
+    if failed is not None:
+        candidate = failed[2].partition(":")[0]
+        if re.fullmatch(
+            r"[A-Za-z_][A-Za-z0-9_]{0,63}(?:Error|Exception)", candidate
+        ):
+            error_type = candidate
+    categories = {_diagnostic_category(code) for code in codes}
+    error_category = None
+    if "extractor_error" in categories:
+        error_category = "extractor_error"
+    elif status == "partial":
+        error_category = (
+            "missing_optional_metadata"
+            if categories and categories <= {"missing_metadata", "metadata_warning"}
+            else "metadata_quality_issue"
+        )
+    return {
+        "extractor": extractor_id,
+        "backend": _METADATA_BACKENDS.get(extractor_id, "unknown"),
+        "status": status,
+        "error_category": error_category,
+        "error_type": error_type,
+        "groups": {
+            group: _group_status(metadata, codes, group)
+            for group in (
+                "capture_time",
+                "gps",
+                "camera",
+                "orientation",
+                "dimensions",
+            )
+        },
+        "diagnostics": [
+            {
+                "severity": severity,
+                "code": code,
+                "category": _diagnostic_category(code),
+            }
+            for severity, code, _detail in diagnostics
+        ],
+    }
 
 
 def validate_google_drive_photos(
@@ -168,13 +302,9 @@ def validate_google_drive_photos(
                         """,
                         (first.object_id,),
                     ).fetchone()
-                    metadata_status = conn.execute(
-                        """
-                        SELECT status FROM metadata_extractions
-                        WHERE object_id = ? ORDER BY extracted_at DESC LIMIT 1
-                        """,
-                        (first.object_id,),
-                    ).fetchone()
+                    metadata_diagnostics = metadata_diagnostic_summary(
+                        conn, first.object_id
+                    )
                     semantic_statuses = [
                         row[0]
                         for row in conn.execute(
@@ -204,9 +334,8 @@ def validate_google_drive_photos(
                         )
                     ),
                 }
-                record["metadata_status"] = (
-                    metadata_status[0] if metadata_status else "missing"
-                )
+                record["metadata_status"] = metadata_diagnostics["status"]
+                record["metadata_diagnostics"] = metadata_diagnostics
                 record["semantic"] = {
                     "result_count": len(semantic_statuses),
                     "statuses": semantic_statuses,
